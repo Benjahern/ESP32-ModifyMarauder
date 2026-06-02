@@ -1,37 +1,10 @@
 // ============================================================
-//  OledDisplay.cpp — Integración OLED SSD1306 con Marauder
-//  Benjamin — ESP32 WROOM-32 Cyberdeck
+//  OledDisplay.cpp — Menú OLED jerárquico 4 niveles
+//  ESP32 Marauder CyberDeck
 // ============================================================
 
 #include "OledDisplay.h"
 #include <WiFi.h>
-
-// ── MENÚS ────────────────────────────────────────────────────
-const char* OledDisplay::_mainMenu[] = { "WiFi", "Bluetooth", "RFID", "Sistema" };
-const int   OledDisplay::_mainMenuLen = 4;
-
-const char* OledDisplay::_wifiMenu[] = {
-  "Scan Redes", "Deauth General", "Deauth Dirigido",
-  "Probe Sniff", "Beacon Spam", "Packet Monitor",
-  "Evil Portal", "< Volver"
-};
-const int OledDisplay::_wifiMenuLen = 8;
-
-const char* OledDisplay::_btMenu[] = {
-  "BLE Scan", "AirTag Scan", "Tracker", "< Volver"
-};
-const int OledDisplay::_btMenuLen = 4;
-
-const char* OledDisplay::_rfidMenu[] = {
-  "Leer UID", "Leer Sector", "Guardar Tarjeta",
-  "Ver Guardadas", "< Volver"
-};
-const int OledDisplay::_rfidMenuLen = 5;
-
-const char* OledDisplay::_sysMenu[] = {
-  "Info Sistema", "Stop Ataque", "Shutdown", "< Volver"
-};
-const int OledDisplay::_sysMenuLen = 4;
 
 // ── CONSTRUCTOR ───────────────────────────────────────────────
 OledDisplay::OledDisplay()
@@ -41,10 +14,10 @@ OledDisplay::OledDisplay()
 // ── INIT ─────────────────────────────────────────────────────
 void OledDisplay::begin() {
   // Botones
-  pinMode(BTN_UP,   INPUT);          // GPIO 34 — input only, pull-up externo 10kΩ
-  pinMode(BTN_DOWN, INPUT);          // GPIO 35 — input only, pull-up externo 10kΩ
-  pinMode(BTN_OK,   INPUT_PULLUP);   // GPIO 32 — pull-up interno
-  pinMode(WAKE_BTN, INPUT_PULLUP);   // GPIO 16 — wake-up desde deep sleep
+  pinMode(BTN_UP,   INPUT);
+  pinMode(BTN_DOWN, INPUT);
+  pinMode(BTN_OK,   INPUT_PULLUP);
+  pinMode(WAKE_BTN, INPUT_PULLUP);
 
   // OLED
   Wire.begin(OLED_SDA, OLED_SCL);
@@ -60,7 +33,7 @@ void OledDisplay::begin() {
   Serial.println(F("[RFID] RC522 iniciado"));
 
   showBoot();
-  showMainMenu();
+  _drawCurrentMenu();
 }
 
 // ── HELPERS DISPLAY ──────────────────────────────────────────
@@ -73,124 +46,98 @@ void OledDisplay::_drawHeader(const char* title) {
   _display.setTextColor(SSD1306_WHITE);
 }
 
-void OledDisplay::_drawMenu(const char** items, int len, int selected, const char* title) {
+// ── TREE HELPERS ─────────────────────────────────────────────
+const MenuNodeDef* OledDisplay::_getTree(uint8_t tree) {
+  switch (tree) {
+    case TREE_MAIN: return mainMenuTree;
+    case TREE_WIFI: return wifiMenuTree;
+    case TREE_BT:   return btMenuTree;
+    case TREE_RFID: return rfidMenuTree;
+    case TREE_SYS:  return sysMenuTree;
+    default: return nullptr;
+  }
+}
+
+uint8_t OledDisplay::_getTreeSize(uint8_t tree) {
+  switch (tree) {
+    case TREE_MAIN: return mainMenuTreeLen;
+    case TREE_WIFI: return wifiMenuTreeLen;
+    case TREE_BT:   return btMenuTreeLen;
+    case TREE_RFID: return rfidMenuTreeLen;
+    case TREE_SYS:  return sysMenuTreeLen;
+    default: return 0;
+  }
+}
+
+// ── DRAW CURRENT MENU ────────────────────────────────────────
+void OledDisplay::_drawCurrentMenu() {
+  const MenuNodeDef* tree = _getTree(_currentTree);
+  uint8_t count = _getTreeSize(_currentTree);
+
+  if (!tree) return;
+
+  // Título del header
+  const char* title;
+  switch (_currentTree) {
+    case TREE_MAIN: title = "CYBERWAWALDO"; break;
+    case TREE_WIFI: title = "WiFi"; break;
+    case TREE_BT:   title = "Bluetooth"; break;
+    case TREE_RFID: title = "RFID"; break;
+    case TREE_SYS:  title = "Sistema"; break;
+    default: title = "";
+  }
+
   _display.clearDisplay();
   _drawHeader(title);
 
-  int visibleStart = 0;
-  if (selected >= 4) visibleStart = selected - 3;
+  // Calcular scroll si hay más de 4 items
+  if (_menuIndex >= _scrollOffset + 4) {
+    _scrollOffset = (_menuIndex >= 4) ? _menuIndex - 3 : 0;
+  }
+  if (_menuIndex < _scrollOffset && _menuIndex >= 4) {
+    _scrollOffset = _menuIndex;
+  }
 
-  for (int i = 0; i < 4; i++) {
-    int idx = visibleStart + i;
-    if (idx >= len) break;
+  // Mostrar 4 items visibles
+  for (uint8_t i = 0; i < 4; i++) {
+    uint8_t idx = _scrollOffset + i;
+    if (idx >= count) break;
+
     int y = 14 + (i * 12);
 
-    if (idx == selected) {
+    // Selección
+    if (idx == _menuIndex) {
       _display.fillRect(0, y - 1, SCREEN_WIDTH, 12, SSD1306_WHITE);
       _display.setTextColor(SSD1306_BLACK);
     } else {
       _display.setTextColor(SSD1306_WHITE);
     }
+
     _display.setTextSize(1);
     _display.setCursor(4, y);
-    _display.print(items[idx]);
+
+    // Mostrar nombre (truncar si muy largo)
+    const char* name = tree[idx].name;
+    if (strlen(name) > 16) {
+      char tmp[17];
+      strncpy(tmp, name, 14);
+      tmp[14] = '\0';
+      _display.print(tmp);
+      _display.print("..");
+    } else {
+      _display.print(name);
+    }
   }
 
-  _display.setTextColor(SSD1306_WHITE);
-  _display.display();
-}
-
-void OledDisplay::showMessage(const char* title,
-                               const char* line1,
-                               const char* line2,
-                               const char* line3) {
-  _display.clearDisplay();
-  _drawHeader(title);
-  _display.setTextSize(1);
-  _display.setTextColor(SSD1306_WHITE);
-  _display.setCursor(0, 15); _display.println(line1);
-  _display.setCursor(0, 27); _display.println(line2);
-  _display.setCursor(0, 39); _display.println(line3);
-  _display.display();
-}
-
-void OledDisplay::showStatus(const char* msg) {
-  _display.fillRect(0, 55, SCREEN_WIDTH, 9, SSD1306_BLACK);
-  _display.setTextColor(SSD1306_WHITE);
-  _display.setTextSize(1);
-  _display.setCursor(0, 56);
-  _display.print(msg);
-  _display.display();
-}
-
-void OledDisplay::showBoot() {
-  _display.clearDisplay();
-  _display.setTextSize(1);
-  _display.setTextColor(SSD1306_WHITE);
-  _display.setCursor(15, 4);  _display.println("ESP32 CYBERWAWALDO");
-  _display.setCursor(40, 16); _display.println("v1.0.0");
-  _display.setCursor(5, 28);  _display.println("WiFi | BT | RFID");
-  _display.setCursor(5, 42);  _display.println("Hold OK = Volver");
-  _display.display();
-  delay(2000);
-}
-
-void OledDisplay::showMainMenu() {
-  _drawMenu(_mainMenu, _mainMenuLen, _menuIndex, "CYBERWAWALDO");
-}
-
-void OledDisplay::showSubMenu() {
-  switch (_parentIdx) {
-    case 0: _drawMenu(_wifiMenu, _wifiMenuLen, _subIndex, "WiFi");      break;
-    case 1: _drawMenu(_btMenu,   _btMenuLen,   _subIndex, "Bluetooth"); break;
-    case 2: _drawMenu(_rfidMenu, _rfidMenuLen, _subIndex, "RFID");      break;
-    case 3: _drawMenu(_sysMenu,  _sysMenuLen,  _subIndex, "Sistema");   break;
-  }
-}
-
-void OledDisplay::showAPList(int scrollOffset) {
-  _apScroll = scrollOffset;
-  _showAPResults();
-}
-
-void OledDisplay::_showAPResults() {
-  _display.clearDisplay();
-  _drawHeader("WiFi Scan");
-
-  if (apCount == 0) {
+  // Indicador de scroll si hay más items
+  if (count > 4) {
     _display.setTextColor(SSD1306_WHITE);
-    _display.setCursor(0, 20);
-    _display.println("Sin resultados");
-    _display.display();
-    return;
+    _display.setCursor(100, 56);
+    _display.print(_menuIndex + 1);
+    _display.print("/");
+    _display.print(count);
   }
 
-  for (int i = 0; i < 3; i++) {
-    int idx = _apScroll + i;
-    if (idx >= apCount) break;
-    int y = 14 + (i * 17);
-
-    _display.setTextSize(1);
-    _display.setTextColor(SSD1306_WHITE);
-
-    String ssid = apResults[idx].ssid;
-    if (ssid.length() == 0) ssid = "(oculto)";
-    if (ssid.length() > 15) ssid = ssid.substring(0, 13) + "..";
-
-    _display.setCursor(0, y);
-    _display.print(ssid);
-
-    _display.setCursor(0, y + 8);
-    _display.print(apResults[idx].rssi);
-    _display.print("dBm ");
-    _display.print(apResults[idx].enc);
-  }
-
-  // Indicador de scroll
-  _display.setCursor(100, 56);
-  _display.print(_apScroll + 1);
-  _display.print("/");
-  _display.print(apCount);
   _display.display();
 }
 
@@ -216,158 +163,238 @@ bool OledDisplay::_btnHeld(int pin, int ms) {
 
 // ── NAVEGACIÓN ───────────────────────────────────────────────
 void OledDisplay::handleUp() {
-  if (_menuLevel == MENU_MAIN) {
-    _menuIndex = (_menuIndex > 0) ? _menuIndex - 1 : _mainMenuLen - 1;
-    showMainMenu();
+  const MenuNodeDef* tree = _getTree(_currentTree);
+  uint8_t count = _getTreeSize(_currentTree);
+
+  if (_menuIndex == 0) {
+    _menuIndex = count - 1;
   } else {
-    int len = 0;
-    switch (_parentIdx) {
-      case 0: len = _wifiMenuLen; break;
-      case 1: len = _btMenuLen;   break;
-      case 2: len = _rfidMenuLen; break;
-      case 3: len = _sysMenuLen;  break;
-    }
-    _subIndex = (_subIndex > 0) ? _subIndex - 1 : len - 1;
-    showSubMenu();
+    _menuIndex--;
   }
+
+  // Scroll
+  if (_menuIndex < _scrollOffset) {
+    _scrollOffset = (_menuIndex >= 4) ? _menuIndex - 3 : 0;
+  }
+
+  _drawCurrentMenu();
 }
 
 void OledDisplay::handleDown() {
-  if (_menuLevel == MENU_MAIN) {
-    _menuIndex = (_menuIndex < _mainMenuLen - 1) ? _menuIndex + 1 : 0;
-    showMainMenu();
-  } else {
-    int len = 0;
-    switch (_parentIdx) {
-      case 0: len = _wifiMenuLen; break;
-      case 1: len = _btMenuLen;   break;
-      case 2: len = _rfidMenuLen; break;
-      case 3: len = _sysMenuLen;  break;
-    }
-    _subIndex = (_subIndex < len - 1) ? _subIndex + 1 : 0;
-    showSubMenu();
+  const MenuNodeDef* tree = _getTree(_currentTree);
+  uint8_t count = _getTreeSize(_currentTree);
+
+  _menuIndex = (_menuIndex + 1) % count;
+
+  // Scroll
+  if (_menuIndex >= _scrollOffset + 4) {
+    _scrollOffset = _menuIndex - 3;
+  }
+
+  _drawCurrentMenu();
+}
+
+void OledDisplay::handleOK() {
+  const MenuNodeDef* tree = _getTree(_currentTree);
+  MenuNodeDef node = tree[_menuIndex];
+
+  switch (node.type) {
+    case NODE_SUBMENU:
+      // Guardar posición actual en path
+      _path[_menuLevel] = _menuIndex;
+      _menuLevel = MENU_SUBCAT;
+      _menuIndex = 0;
+      _scrollOffset = 0;
+
+      // Cambiar al subtree del nodo seleccionado
+      switch (_currentTree) {
+        case TREE_MAIN:
+          if (_menuIndex == 0) _currentTree = TREE_WIFI;
+          else if (_menuIndex == 1) _currentTree = TREE_BT;
+          else if (_menuIndex == 2) _currentTree = TREE_RFID;
+          else if (_menuIndex == 3) _currentTree = TREE_SYS;
+          break;
+      }
+      _drawCurrentMenu();
+      break;
+
+    case NODE_ACTION:
+      _path[_menuLevel] = _menuIndex;
+      _execAction(&node);
+      break;
+
+    case NODE_BACK:
+      handleBack();
+      break;
   }
 }
 
 void OledDisplay::handleBack() {
-  if (_menuLevel != MENU_MAIN) {
-    _menuLevel = MENU_MAIN;
-    showMainMenu();
-  }
-}
+  if (_menuLevel == MENU_MAIN) return;
 
-void OledDisplay::handleOK() {
+  _menuLevel--;
+  _menuIndex = _path[_menuLevel];
+  _scrollOffset = 0;
+
+  // Volver al tree del nivel correspondiente
   if (_menuLevel == MENU_MAIN) {
-    _parentIdx = _menuIndex;
-    _subIndex  = 0;
-    _menuLevel = MENU_SUB;
-    showSubMenu();
-    return;
+    _currentTree = TREE_MAIN;
+  } else if (_menuLevel == MENU_CATEGORY) {
+    // Volvemos al main, ajustar el index para saber cuál category
+    _menuIndex = _path[0];
+    if (_currentTree == TREE_WIFI || _currentTree == TREE_BT ||
+        _currentTree == TREE_RFID || _currentTree == TREE_SYS) {
+      _currentTree = TREE_MAIN;
+    }
   }
-  _execAction();
+
+  _drawCurrentMenu();
 }
 
 // ── EJECUTAR ACCIÓN ──────────────────────────────────────────
-void OledDisplay::_execAction() {
-  // Detectar "< Volver" en cualquier submenú
-  bool isBack = false;
-  switch (_parentIdx) {
-    case 0: isBack = (_subIndex == _wifiMenuLen - 1); break;
-    case 1: isBack = (_subIndex == _btMenuLen   - 1); break;
-    case 2: isBack = (_subIndex == _rfidMenuLen - 1); break;
-    case 3: isBack = (_subIndex == _sysMenuLen  - 1); break;
+void OledDisplay::_execAction(const MenuNodeDef* node) {
+  int action = node->action;
+
+  // ══ ACCIONES LOCALES (códigos negativos) ══════════════════
+
+  // RFID acciones
+  if (action == -10) { // Leer UID
+    doRFIDRead();
+    _drawCurrentMenu();
+    return;
   }
-  if (isBack) { handleBack(); return; }
-
-  switch (_parentIdx) {
-    // ── WIFI ─────────────────────────────────────────────────
-    case 0:
-      switch (_subIndex) {
-        case 0: // Scan Redes
-          _actionRequested = true;
-          _requestedAction = ACTION_WIFI_SCAN;
-          break;
-        case 1: // Deauth General
-          _actionRequested = true;
-          _requestedAction = ACTION_DEAUTH;
-          break;
-        case 2: // Deauth Dirigido
-          _actionRequested = true;
-          _requestedAction = ACTION_DEAUTH_TARGETED;
-          break;
-        case 3: // Probe Sniff
-          _actionRequested = true;
-          _requestedAction = ACTION_PROBE_SNIFF;
-          break;
-        case 4: // Beacon Spam
-          _actionRequested = true;
-          _requestedAction = ACTION_BEACON_SPAM;
-          break;
-        case 5: // Packet Monitor
-          _actionRequested = true;
-          _requestedAction = ACTION_PACKET_MONITOR;
-          break;
-        case 6: // Evil Portal
-          showMessage("Evil Portal", "Usa serial:", "evilportal", "OK=volver");
-          while (!_btnPressed(BTN_OK)) delay(50);
-          showSubMenu();
-          break;
-      }
-      break;
-
-    // ── BLUETOOTH ────────────────────────────────────────────
-    case 1:
-      switch (_subIndex) {
-        case 0: // BLE Scan
-          _actionRequested = true;
-          _requestedAction = ACTION_BLE_SCAN;
-          break;
-        case 1: // AirTag Scan
-          _actionRequested = true;
-          _requestedAction = ACTION_AIRTAG_SCAN;
-          break;
-        case 2: // Tracker
-          _actionRequested = true;
-          _requestedAction = ACTION_TRACKER;
-          break;
-      }
-      break;
-
-    // ── RFID ─────────────────────────────────────────────────
-    case 2:
-      switch (_subIndex) {
-        case 0: doRFIDRead();   showSubMenu(); break;
-        case 1: // Leer Sector
-          showMessage("Sector Read", "Acerca tarjeta", "Mifare Classic");
-          doRFIDRead(); // reutilizamos con sector
-          showSubMenu();
-          break;
-        case 2: // Guardar
-          showMessage("Guardar", "Acerca tarjeta", "para guardar");
-          doRFIDRead();
-          showSubMenu();
-          break;
-        case 3: doRFIDList(); showSubMenu(); break;
-      }
-      break;
-
-    // ── SISTEMA ──────────────────────────────────────────────
-    case 3:
-      switch (_subIndex) {
-        case 0: _doSysInfo(); showSubMenu(); break;
-        case 1: // Stop
-          _actionRequested = true;
-          _requestedAction = ACTION_STOP;
-          showMessage("Sistema", "Ataque detenido", "OK para volver");
-          delay(1500);
-          showSubMenu();
-          break;
-        case 2: // Shutdown
-          _doShutdown();
-          break;
-      }
-      break;
+  if (action == -11) { // Leer Sector
+    showMessage("Sector Read", "No implementada", "Mifare Classic", "OK=volver");
+    while (!_btnPressed(BTN_OK)) delay(50);
+    _drawCurrentMenu();
+    return;
   }
+  if (action == -12) { // Guardar Tarjeta
+    doRFIDRead();
+    _drawCurrentMenu();
+    return;
+  }
+  if (action == -13) { // Ver Guardadas
+    doRFIDList();
+    _drawCurrentMenu();
+    return;
+  }
+
+  // Sistema acciones
+  if (action == -20) { // Info Sistema
+    _doSysInfo();
+    _drawCurrentMenu();
+    return;
+  }
+  if (action == -21) { // Shutdown
+    _doShutdown();
+    return;
+  }
+  if (action == -22) { // Settings (serial)
+    _showSerialHelp("Settings", "Use serial/cli");
+    return;
+  }
+
+  // Acciones que requieren serial (códigos -2 a -5)
+  if (action == -2) { // Join WiFi
+    _showSerialHelp("Join WiFi", "join <ssid> <pass>");
+    return;
+  }
+  if (action == -3) { // Join Saved
+    _showSerialHelp("Join Saved", "loadwifi / joinwifi");
+    return;
+  }
+  if (action == -4) { // Start AP
+    _showSerialHelp("Start AP", "ap <ssid> <pass>");
+    return;
+  }
+  if (action == -5) { // Set MACs
+    _showSerialHelp("Set MACs", "setmac <ap|sta> <mac>");
+    return;
+  }
+
+  // ══ ACCIONES WIFI/BT/GPS (códigos positivos) ════════════════
+
+  // Para ataques持久, mostrar feedback y retornar
+  // El loop principal se encargará de iniciar el scan
+
+  const char* title = node->name;
+  const char* msg1 = "Corriendo...";
+  const char* msg2 = "OK para menu";
+
+  switch (action) {
+    // WiFi Sniffers
+    case 1:  msg1 = "Sniffing probes..."; break;    // WIFI_SCAN_PROBE
+    case 2:  msg1 = "Escaneando APs..."; break;     // WIFI_SCAN_AP
+    case 3:  msg1 = "PWN mode..."; break;           // WIFI_SCAN_PWN
+    case 5:  msg1 = "Sniffing deauths..."; break;   // WIFI_SCAN_DEAUTH
+    case 7:  msg1 = "Monitor packets..."; break;    // WIFI_PACKET_MONITOR
+    case 25: msg1 = "Raw capture..."; break;        // WIFI_SCAN_RAW_CAPTURE
+    case 46: msg1 = "Channel analyze..."; break;    // WIFI_SCAN_CHAN_ANALYZER
+    case 50: msg1 = "PineAP scan..."; break;       // WIFI_SCAN_PINESCAN
+    case 51: msg1 = "MultiSSID scan..."; break;     // WIFI_SCAN_MULTISSID
+    case 77: msg1 = "SAE commit..."; break;          // WIFI_SCAN_SAE_COMMIT
+
+    // WiFi Attacks
+    case 8:  msg1 = "Enviando beacons..."; break;   // WIFI_ATTACK_BEACON_SPAM
+    case 9:  msg1 = "Rick Roll!"; break;             // WIFI_ATTACK_RICK_ROLL
+    case 15: msg1 = "Beacon list..."; break;         // WIFI_ATTACK_BEACON_LIST
+    case 18: msg1 = "Auth attack..."; break;         // WIFI_ATTACK_AUTH
+    case 20: msg1 = "Deauth broadcast..."; break;    // WIFI_ATTACK_DEAUTH
+    case 21: msg1 = "AP spam..."; break;            // WIFI_ATTACK_AP_SPAM
+    case 27: msg1 = "Deauth target..."; break;      // WIFI_ATTACK_DEAUTH_TARGETED
+    case 30: msg1 = "Karma/EvilPortal..."; break;   // WIFI_SCAN_EVIL_PORTAL
+    case 56: msg1 = "Bad msg attack..."; break;     // WIFI_ATTACK_BAD_MSG
+    case 61: msg1 = "Assoc sleep..."; break;        // WIFI_ATTACK_SLEEP
+    case 78: msg1 = "SAE flood..."; break;          // WIFI_ATTACK_SAE_COMMIT
+    case 79: msg1 = "Channel switch..."; break;     // WIFI_ATTACK_CSA
+    case 80: msg1 = "Quiet mode..."; break;         // WIFI_ATTACK_QUIET
+    case 99: msg1 = "Funny beacons..."; break;      // WIFI_ATTACK_FUNNY_BEACON
+
+    // WiFi General
+    case 26: msg1 = "STA select..."; break;         // WIFI_SCAN_STATION
+    case 83: msg1 = "AP info..."; break;            // WIFI_SCAN_DISPLAY_AP_INFO
+
+    // Bluetooth
+    case 10: msg1 = "BLE scan..."; break;           // BT_SCAN_ALL
+    case 11: msg1 = "CC skimmers..."; break;        // BT_SCAN_SKIMMERS
+    case 36: msg1 = "Sour Apple..."; break;         // BT_ATTACK_SOUR_APPLE
+    case 37: msg1 = "Swiftpair spam..."; break;     // BT_ATTACK_SWIFTPAIR_SPAM
+    case 38: msg1 = "Spam all BLE..."; break;       // BT_ATTACK_SPAM_ALL
+    case 39: msg1 = "Samsung spam..."; break;       // BT_ATTACK_SAMSUNG_SPAM
+    case 41: msg1 = "Google spam..."; break;        // BT_ATTACK_GOOGLE_SPAM
+    case 42: msg1 = "Flipper spam..."; break;       // BT_ATTACK_FLIPPER_SPAM
+    case 43: msg1 = "AirTag scan..."; break;        // BT_SCAN_AIRTAG
+    case 45: msg1 = "Flipper sniff..."; break;      // BT_SCAN_FLIPPER
+    case 47: msg1 = "BT analyzer..."; break;         // BT_SCAN_ANALYZER
+    case 70: msg1 = "AirTag monitor..."; break;     // BT_SCAN_AIRTAG_MON
+    case 72: msg1 = "Flock detect..."; break;        // BT_SCAN_FLOCK
+    case 81: msg1 = "Meta detect..."; break;         // BT_SCAN_RAYBAN
+    case 82: msg1 = "Apple Juice..."; break;        // BT_ATTACK_APPLE_JUICE
+
+    // GPS
+    case 31: msg1 = "GPS data..."; break;           // WIFI_SCAN_GPS_DATA
+    case 40: msg1 = "NMEA stream..."; break;         // WIFI_SCAN_GPS_NMEA
+    case 55: msg1 = "GPS tracking..."; break;         // GPS_TRACKER
+    case 63: msg1 = "POI mode..."; break;           // GPS_POI
+
+    // Stop
+    case 0:  msg1 = "Detenido"; msg2 = "OK"; break; // WIFI_SCAN_OFF
+  }
+
+  showMessage(title, msg1, msg2);
+  delay(1000);
+
+  // Solicitar acción al loop principal
+  _actionRequested = true;
+  _requestedAction = action;
+}
+
+// ── MOSTRAR MENSAJE CON ESPERA ───────────────────────────────
+void OledDisplay::_showSerialHelp(const char* title, const char* cmd) {
+  showMessage(title, cmd, "OK=volver", "Ver serial");
+  while (!_btnPressed(BTN_OK)) delay(50);
+  _drawCurrentMenu();
 }
 
 // ── ACCIONES LOCALES ─────────────────────────────────────────
@@ -420,17 +447,14 @@ void OledDisplay::_doShutdown() {
   _display.display();
   delay(2000);
 
-  // Esperar confirmación con OK
   while (true) {
     if (_btnPressed(BTN_OK)) {
-      // Apagar pantalla primero
       _display.ssd1306_command(SSD1306_DISPLAYOFF);
       delay(100);
-      // Deep sleep - despierta con RESET o GPIO16
       ESP.deepSleep(0);
     }
     if (_btnPressed(BTN_DOWN)) {
-      showSubMenu();
+      _drawCurrentMenu();
       return;
     }
     delay(50);
@@ -464,7 +488,6 @@ void OledDisplay::doRFIDRead() {
     MFRC522::PICC_Type t = _rfid.PICC_GetType(_rfid.uid.sak);
     String typeName = String(_rfid.PICC_GetTypeName(t));
 
-    // Mostrar en Serial también
     Serial.println("[RFID] UID: " + uid + " Tipo: " + typeName);
 
     _display.clearDisplay();
@@ -530,7 +553,90 @@ void OledDisplay::doRFIDList() {
   }
 }
 
-// ── TICK — llamar en loop() ───────────────────────────────────
+// ── MOSTRAR RESULTADOS ────────────────────────────────────────
+void OledDisplay::_showAPResults() {
+  if (apCount == 0) {
+    showMessage("WiFi Scan", "Sin resultados", "OK=volver");
+    while (!_btnPressed(BTN_OK)) delay(50);
+    return;
+  }
+
+  int scroll = 0;
+  while (true) {
+    _display.clearDisplay();
+    _drawHeader("WiFi Scan");
+
+    for (int i = 0; i < 3; i++) {
+      int idx = scroll + i;
+      if (idx >= apCount) break;
+      int y = 14 + (i * 17);
+
+      String ssid = apResults[idx].ssid;
+      if (ssid.length() == 0) ssid = "(oculto)";
+      if (ssid.length() > 15) ssid = ssid.substring(0, 13) + "..";
+
+      _display.setTextSize(1);
+      _display.setTextColor(SSD1306_WHITE);
+      _display.setCursor(0, y);
+      _display.print(ssid);
+
+      _display.setCursor(0, y + 8);
+      _display.print(apResults[idx].rssi);
+      _display.print("dBm ");
+      _display.print(apResults[idx].enc);
+    }
+
+    _display.setCursor(100, 56);
+    _display.print(scroll + 1);
+    _display.print("/");
+    _display.print(apCount);
+    _display.display();
+
+    if (_btnPressed(BTN_UP) && scroll > 0) scroll--;
+    if (_btnPressed(BTN_DOWN) && scroll < apCount - 3) scroll++;
+    if (_btnPressed(BTN_OK)) return;
+    delay(50);
+  }
+}
+
+// ── SHOW MESSAGE ──────────────────────────────────────────────
+void OledDisplay::showMessage(const char* title,
+                               const char* line1,
+                               const char* line2,
+                               const char* line3) {
+  _display.clearDisplay();
+  _drawHeader(title);
+  _display.setTextSize(1);
+  _display.setTextColor(SSD1306_WHITE);
+  _display.setCursor(0, 15); _display.println(line1);
+  _display.setCursor(0, 27); _display.println(line2);
+  _display.setCursor(0, 39); _display.println(line3);
+  _display.display();
+}
+
+void OledDisplay::showStatus(const char* msg) {
+  _display.fillRect(0, 55, SCREEN_WIDTH, 9, SSD1306_BLACK);
+  _display.setTextColor(SSD1306_WHITE);
+  _display.setTextSize(1);
+  _display.setCursor(0, 56);
+  _display.print(msg);
+  _display.display();
+}
+
+// ── BOOT ─────────────────────────────────────────────────────
+void OledDisplay::showBoot() {
+  _display.clearDisplay();
+  _display.setTextSize(1);
+  _display.setTextColor(SSD1306_WHITE);
+  _display.setCursor(15, 4);  _display.println("ESP32 CYBERWAWALDO");
+  _display.setCursor(40, 16); _display.println("v2.0.0");
+  _display.setCursor(5, 28);  _display.println("WiFi | BT | RFID");
+  _display.setCursor(5, 42);  _display.println("Hold OK = Volver");
+  _display.display();
+  delay(2000);
+}
+
+// ── TICK — llamar en loop() ──────────────────────────────────
 void OledDisplay::tick() {
   // Leer botones
   if (_btnPressed(BTN_UP))   handleUp();
@@ -541,7 +647,6 @@ void OledDisplay::tick() {
     unsigned long t = millis();
     while (digitalRead(WAKE_BTN) == LOW) {
       if (millis() - t > 2000) {
-        // Apagar pantalla y deep sleep
         _display.ssd1306_command(SSD1306_DISPLAYOFF);
         delay(100);
         ESP.deepSleep(0);
@@ -568,10 +673,5 @@ void OledDisplay::tick() {
         handleOK();
       }
     }
-  }
-
-  // Si hay resultado de WiFi scan, mostrar en pantalla
-  if (_requestedAction == ACTION_WIFI_SCAN && !_actionRequested && apCount > 0) {
-    _showAPResults();
   }
 }

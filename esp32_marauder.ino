@@ -486,80 +486,43 @@ void loop()
 
   oled.tick();
 
+  // ══ OLED MENU ACTIONS ════════════════════════════════════════
   if (oled.isActionRequested()) {
     int action = oled.getRequestedAction();
     oled.clearActionRequest();
 
-    switch (action) {
-      case ACTION_WIFI_SCAN:
-        wifi_scan_obj.StartScan(WIFI_SCAN_AP);
-        oled.showMessage("WiFi Scan", "Escaneando...", "Espera ~5s");
-        delay(5000);
-        oled.apCount = 0;
-        for (int i = 0; i < WiFi.scanComplete() && i < 30; i++) {
-          oled.apResults[i].ssid = WiFi.SSID(i);
-          oled.apResults[i].rssi = WiFi.RSSI(i);
-          switch (WiFi.encryptionType(i)) {
-            case WIFI_AUTH_OPEN:         oled.apResults[i].enc = "Open"; break;
-            case WIFI_AUTH_WPA_PSK:      oled.apResults[i].enc = "WPA";  break;
-            case WIFI_AUTH_WPA2_PSK:     oled.apResults[i].enc = "WPA2"; break;
-            case WIFI_AUTH_WPA_WPA2_PSK: oled.apResults[i].enc = "WPA+"; break;
-            default:                     oled.apResults[i].enc = "?";    break;
-          }
-          oled.apCount++;
-        }
-        oled.showAPList(0);
-        break;
-
-      case ACTION_DEAUTH:
-        wifi_scan_obj.StartScan(WIFI_ATTACK_DEAUTH);
-        oled.showMessage("Deauth", "Corriendo...", "OK para detener");
-        break;
-
-      case ACTION_DEAUTH_TARGETED:
-        wifi_scan_obj.StartScan(WIFI_ATTACK_DEAUTH_TARGETED);
-        oled.showMessage("Deauth Dirigido", "Selecciona obj...", "OK para detener");
-        break;
-
-      case ACTION_PROBE_SNIFF:
-        wifi_scan_obj.StartScan(WIFI_SCAN_PROBE);
-        oled.showMessage("Probe Sniffer", "Corriendo...", "Ver Serial");
-        break;
-
-      case ACTION_BEACON_SPAM:
-        wifi_scan_obj.StartScan(WIFI_ATTACK_BEACON_SPAM);
-        oled.showMessage("Beacon Spam", "Enviando beacons", "OK para detener");
-        break;
-
-      case ACTION_PACKET_MONITOR:
-        wifi_scan_obj.StartScan(WIFI_PACKET_MONITOR);
-        oled.showMessage("Packet Monitor", "Monitoreando...", "OK para detener");
-        break;
-
-      case ACTION_BLE_SCAN:
-        wifi_scan_obj.StartScan(BT_SCAN_ALL);
-        oled.showMessage("BLE Scan", "Escaneando...", "Ver Serial");
-        delay(5000);
-        wifi_scan_obj.StopScan(BT_SCAN_ALL);
-        break;
-
-      case ACTION_AIRTAG_SCAN:
-        wifi_scan_obj.StartScan(BT_SCAN_AIRTAG);
-        oled.showMessage("AirTag Scan", "Buscando...", "OK para detener");
-        break;
-
-      case ACTION_TRACKER:
-        wifi_scan_obj.StartScan(WIFI_SCAN_DETECT_FOLLOW);
-        oled.showMessage("Tracker", "Buscando...", "OK para detener");
-        break;
-
-      case ACTION_STOP:
-        wifi_scan_obj.StopScan(WIFI_SCAN_OFF);
-        oled.showMessage("Stop", "Ataque detenido");
-        break;
+    // Detener scan actual antes de empezar uno nuevo
+    if (wifi_scan_obj.currentScanMode != WIFI_SCAN_OFF &&
+        wifi_scan_obj.currentScanMode != WIFI_CONNECTED) {
+      wifi_scan_obj.StopScan(wifi_scan_obj.currentScanMode);
     }
+
+    // ══ WIFI SCANS (1-77) ════════════════════════════════════
+    if (action >= 1 && action <= 77) {
+      wifi_scan_obj.StartScan(action);
+      return;
+    }
+
+    // ══ BLUETOOTH SCANS (10-82) ═════════════════════════════
+    if (action >= 10 && action <= 82) {
+      wifi_scan_obj.StartScan(action);
+      return;
+    }
+
+    // ══ STOP (0 = WIFI_SCAN_OFF) ═════════════════════════════
+    if (action == 0) {
+      wifi_scan_obj.StopScan(WIFI_SCAN_OFF);
+      oled.showMessage("Stop", "Ataque detenido");
+      delay(1500);
+      return;
+    }
+
+    // ══ SERIAL-ONLY ACTIONS (negative) ══════════════════════
+    // Estas muestran help y retornan
+    // El usuario debe usar serial para estas funciones
   }
-
-
-
 }
+
+
+
+
